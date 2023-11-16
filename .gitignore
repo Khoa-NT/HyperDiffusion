@@ -11,6 +11,10 @@ meshes
 lightning_checkpoints
 *.ckpt
 .github/workflows
+data/02691156_2048_pc
+data/*.zip
+mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
+mlp_weights/*.zip
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
