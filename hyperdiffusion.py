@@ -36,13 +36,14 @@ class HyperDiffusion(pl.LightningModule):
         self.sample_count = min(
             8, Config.get("batch_size")
         )  # it shouldn't be more than 36 limited by batch_size
-        fake_data = torch.randn(*image_shape)
+        ### image_shape = [B, n_weight]
+        fake_data = torch.randn(*image_shape) 
 
         encoded_outs = fake_data
         print("encoded_outs.shape", encoded_outs.shape)
         timesteps = Config.config["timesteps"]
         betas = torch.tensor(np.linspace(1e-4, 2e-2, timesteps))
-        self.image_size = encoded_outs[:1].shape
+        self.image_size = encoded_outs[:1].shape ### [B, n_weight]
 
         # Initialize diffusion utiities
         self.diff = GaussianDiffusion(
@@ -95,8 +96,9 @@ class HyperDiffusion(pl.LightningModule):
 
         # At the first step output first element in the dataset as a sanit check
         if "hyper" in self.method and self.trainer.global_step == 0:
+            ### curr_weights is not defined --> curr_weights=None
             curr_weights = Config.get("curr_weights")
-            img = input_data[0].flatten()[:curr_weights]
+            img = input_data[0].flatten()[:curr_weights] ### Get all weights
             print(img.shape)
             mlp = generate_mlp_from_weights(img, self.mlp_kwargs)
             sdf_decoder = SDFDecoder(
@@ -486,6 +488,7 @@ class HyperDiffusion(pl.LightningModule):
         return metrics
 
     def calc_metrics(self, split_type):
+        ## ------ Read valid set ------ ##
         dataset_path = os.path.join(
             Config.config["dataset_dir"],
             Config.config["dataset"] + f"_{self.cfg.val.num_points}_pc",
@@ -520,9 +523,12 @@ class HyperDiffusion(pl.LightningModule):
             pcs.append(pc)
         r = Rotation.from_euler("x", 90, degrees=True)
         self.logger.experiment.log({"3d_gt": wandb.Object3D(r.apply(np.array(pcs[0])))})
-        ref_pcs = torch.stack(pcs)
+        ref_pcs = torch.stack(pcs) # [N_object, num_points, 3]
 
+
+        ## ------ Infer/Sample from Diffusion model ------ ##
         # We are generating slightly more than ref_pcs
+        ### test_sample_mult: 1.1
         number_of_samples_to_generate = int(len(ref_pcs) * self.cfg.test_sample_mult)
 
         # Then process generated shapes
@@ -532,7 +538,7 @@ class HyperDiffusion(pl.LightningModule):
         for _ in tqdm(range(number_of_samples_to_generate // test_batch_size)):
             sample_x_0s.append(
                 self.diff.ddim_sample_loop(
-                    self.model, (test_batch_size, *self.image_size[1:])
+                    self.model, (test_batch_size, *self.image_size[1:]) ### Sample with shape [n_weight]
                 )
             )
 

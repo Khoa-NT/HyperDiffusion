@@ -55,6 +55,8 @@ def main(cfg: DictConfig):
         mode="online",
     )
     first_state_dict = None
+
+    ### cfg.strategy = first_weights or save_pc
     if cfg.strategy == "same_init":
         first_state_dict = get_model(cfg).state_dict()
     x_0s = []
@@ -62,13 +64,15 @@ def main(cfg: DictConfig):
         cfg.mlp_config.output_type = cfg.output_type
     curr_lr = cfg.lr
     root_path = os.path.join(cfg.logging_root, cfg.exp_name)
-    mesh_jitter = cfg.mesh_jitter
+    mesh_jitter = cfg.mesh_jitter # False
     multip_cfg = cfg.multi_process
     files = [
         file
         for file in os.listdir(cfg.dataset_folder)
         if file not in ["train_split.lst", "test_split.lst", "val_split.lst"]
     ]
+
+    ### multip_cfg.enabled = False
     if multip_cfg.enabled:
         if multip_cfg.ignore_first:
             files = files[1:]  # Ignoring the first one
@@ -84,6 +88,7 @@ def main(cfg: DictConfig):
         print(
             f"Proc {multip_cfg.part_id} is responsible between {start_index} -> {end_index}"
         )
+
     lengths = []
     names = []
     train_object_names = np.genfromtxt(
@@ -106,11 +111,11 @@ def main(cfg: DictConfig):
 
             sdf_dataset = dataio.PointCloud(
                 os.path.join(cfg.dataset_folder, file),
-                on_surface_points=cfg.batch_size,
+                on_surface_points=cfg.batch_size, # 2048
                 is_mesh=True,
-                output_type=cfg.output_type,
-                out_act=cfg.out_act,
-                n_points=cfg.n_points,
+                output_type=cfg.output_type, # "occ"
+                out_act=cfg.out_act, # sigmoid
+                n_points=cfg.n_points, # 100000
                 cfg=cfg,
             )
             dataloader = DataLoader(

@@ -504,7 +504,10 @@ class PointCloud(Dataset):
         self.cfg = cfg
         if is_mesh:
             if cfg.strategy == "save_pc":
+                ### Read the stl file
                 obj: trimesh.Trimesh = trimesh.load(path)
+
+                ### Normalize the vertices to range [-0.5, 0.5]
                 vertices = obj.vertices
                 vertices -= np.mean(vertices, axis=0, keepdims=True)
                 v_max = np.amax(vertices)
@@ -512,25 +515,37 @@ class PointCloud(Dataset):
                 vertices *= 0.5 * 0.95 / (max(abs(v_min), abs(v_max)))
                 obj.vertices = vertices
                 self.obj = obj
+
+                ## ------ Sampling point for dataset ------ ##
                 total_points = cfg.n_points  # 100000
                 n_points_uniform = total_points  # int(total_points * 0.5)
                 n_points_surface = total_points  # total_points
+                
+                ### We will sample random point cloud coordinates in the [-0.5, 0.5] cube
+                # and sample the point cloud coordinates near the mesh surface
 
+                ### 1) Random sample n_points_uniform coordinates
                 points_uniform = np.random.uniform(
                     -0.5, 0.5, size=(n_points_uniform, 3)
                 )
+                ### 2) Sample near the surface
                 points_surface = obj.sample(n_points_surface)
                 points_surface += 0.01 * np.random.randn(n_points_surface, 3)
+
+                ### Merge
                 points = np.concatenate([points_surface, points_uniform], axis=0)
 
+                ### Calculate winding number
+                # https://www.gradientspace.com/tutorials/2017/12/14/3d-bitmaps-and-minecraft-meshes
                 inside_surface_values = igl.fast_winding_number_for_meshes(
                     obj.vertices, obj.faces, points
                 )
+                ### Create label with 0: outside and 1:inside
                 thresh = 0.5
                 occupancies_winding = np.piecewise(
                     inside_surface_values,
                     [inside_surface_values < thresh, inside_surface_values >= thresh],
-                    [0, 1],
+                    [0, 1], # [outside, inside]
                 )
                 occupancies = occupancies_winding[..., None]
                 print(points.shape, occupancies.shape, occupancies.sum())
@@ -624,13 +639,17 @@ class PointCloud(Dataset):
             self.coords = np.array(self.coords)
             self.occupancies = np.array(self.occupancies)
         elif cfg.strategy == "save_pc":
+            ### Redundant step here, they can just save with the point_cloud directly
             self.coords = point_cloud[:, :3]
             self.normals = point_cloud[:, 3:]
 
             point_cloud_xyz = np.hstack((self.coords, self.normals))
             os.makedirs(pc_folder, exist_ok=True)
+
+            ### Export the .npy file
             np.save(os.path.join(pc_folder, os.path.basename(path)), point_cloud_xyz)
         else:
+            ### Load .npy file
             point_cloud = np.load(
                 os.path.join(pc_folder, os.path.basename(path) + ".npy")
             )

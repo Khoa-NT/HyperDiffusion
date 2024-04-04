@@ -690,7 +690,7 @@ class GaussianDiffusion:
         if noise is not None:
             img = noise
         else:
-            img = th.randn(*shape, device=device)
+            img = th.randn(*shape, device=device) ### Sample with shape [n_weight]
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -773,6 +773,7 @@ class GaussianDiffusion:
 
         terms = {}
 
+        ### self.loss_type = MSE
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
             terms["loss"] = self._vb_terms_bpd(
                 model=model,
@@ -787,6 +788,7 @@ class GaussianDiffusion:
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
+            ### model_var_type: FIXED_LARGE
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,

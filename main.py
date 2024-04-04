@@ -94,11 +94,19 @@ def main(cfg: DictConfig):
         test_size = int(total_size * 0.15)
         train_size = total_size - val_size - test_size
         if not os.path.exists(os.path.join(dataset_path, "train_split.lst")):
+            ### Random choice in `range(total_size)` with size `train_size + val_size`
+            ### No duplication
             train_idx = np.random.choice(
                 total_size, train_size + val_size, replace=False
             )
+
+            ### Get the remain that not in train_valid
             test_idx = set(range(total_size)).difference(train_idx)
+
+            ### Get the valid in the train_valid
             val_idx = set(np.random.choice(train_idx, val_size, replace=False))
+
+            ### The remain in train_valid
             train_idx = set(train_idx).difference(val_idx)
             print(
                 "Generating new partition",
@@ -158,7 +166,7 @@ def main(cfg: DictConfig):
         )
         train_dl = DataLoader(
             train_dt,
-            batch_size=Config.get("batch_size"),
+            batch_size=Config.get("batch_size"), # batch_size: 32
             shuffle=True,
             num_workers=8,
             pin_memory=True,
@@ -216,6 +224,7 @@ def main(cfg: DictConfig):
     model_resume_path = Config.get("model_resume_path")
 
     # Initialize HyperDiffusion
+    ### input_data.shape = [B, n_weight]
     diffuser = HyperDiffusion(
         model, train_dt, val_dt, test_dt, mlp_kwargs, input_data.shape, method, cfg
     )
