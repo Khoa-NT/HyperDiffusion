@@ -33,7 +33,7 @@ from siren.experiment_scripts.test_sdf import SDFDecoder
 
 
 def get_model(cfg):
-    if cfg.model_type == "mlp_3d":
+    if cfg.model_type == "mlp_3d": ### mlp_3d
         model = MLP3D(**cfg.mlp_config)
     nparameters = sum(p.numel() for p in model.parameters())
     print(model)
@@ -60,8 +60,12 @@ def main(cfg: DictConfig):
     if cfg.strategy == "same_init":
         first_state_dict = get_model(cfg).state_dict()
     x_0s = []
-    with open_dict(cfg):
-        cfg.mlp_config.output_type = cfg.output_type
+
+    ### Temporarily disable the struct flag to allow creating new keys.
+    ### Ref: https://omegaconf.readthedocs.io/en/latest/usage.html#struct-flag
+    with open_dict(cfg): 
+        cfg.mlp_config.output_type = cfg.output_type ### "occ"
+        
     curr_lr = cfg.lr
     root_path = os.path.join(cfg.logging_root, cfg.exp_name)
     mesh_jitter = cfg.mesh_jitter # False
@@ -133,13 +137,13 @@ def main(cfg: DictConfig):
 
             # Define the loss
             loss_fn = loss_functions.sdf
-            if cfg.output_type == "occ":
+            if cfg.output_type == "occ": ### output_type is "occ"
                 loss_fn = (
                     loss_functions.occ_tanh
                     if cfg.out_act == "tanh"
-                    else loss_functions.occ_sigmoid
+                    else loss_functions.occ_sigmoid ### out_act is "sigmoid"
                 )
-            loss_fn = partial(loss_fn, cfg=cfg)
+            loss_fn = partial(loss_fn, cfg=cfg) ### occ_sigmoid in this case
             summary_fn = utils.wandb_sdf_summary
 
             filename = f"{cfg.output_type}_{filename}"
@@ -242,7 +246,7 @@ def main(cfg: DictConfig):
                             ),
                             N=256,
                             level=0.5
-                            if cfg.output_type == "occ" and cfg.out_act == "sigmoid"
+                            if cfg.output_type == "occ" and cfg.out_act == "sigmoid" ### True with current settings
                             else 0,
                             time_val=time_val,
                         )
@@ -263,8 +267,8 @@ def main(cfg: DictConfig):
                         sdf_decoder,
                         os.path.join(cfg.logging_root, f"{cfg.exp_name}_ply", filename),
                         N=256,
-                        level=0
-                        if cfg.output_type == "occ" and cfg.out_act == "sigmoid"
+                        level=0 ### Always 0
+                        if cfg.output_type == "occ" and cfg.out_act == "sigmoid" ### Always 0
                         else 0,
                     )
 

@@ -1,6 +1,6 @@
 input_type: "mesh"
 output_type: "occ" # or sdf or occ
-in_out: True
+in_out: True ### Sample Inner and Outer surface points
 augment_on_the_fly: False
 mesh_jitter: False
 dataset_folder: "./data/02691156"

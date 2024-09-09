@@ -180,7 +180,7 @@ def train(
                         model.train()
                 total_steps += 1
             epoch_loss = total_loss / total_items
-            if cfg.scheduler.type == "adaptive":
+            if cfg.scheduler.type == "adaptive": ### type: adaptive
                 prev_bad_epochs = scheduler.num_bad_epochs
                 prev_best = scheduler.best
                 prev_lr = next(iter(optim.param_groups))["lr"]

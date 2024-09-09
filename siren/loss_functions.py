@@ -294,7 +294,7 @@ def helmholtz_pml(model_output, gt):
 def occ_sigmoid(model_output, gt, model, cfg=None, first_state_dict=None):
     gt_sdf = gt["sdf"]
     pred_sdf = model_output["model_out"]
-    if cfg.kl_weight > 0 and first_state_dict is not None:
+    if cfg.kl_weight > 0 and first_state_dict is not None: ### kl_weight is 0
         param_arr = []
         for param in model.parameters():
             param_arr.append(param.flatten())
