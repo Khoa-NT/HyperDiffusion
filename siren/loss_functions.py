@@ -290,11 +290,14 @@ def helmholtz_pml(model_output, gt):
         "data_term": torch.abs(data_term).sum() * batch_size / 1,
     }
 
-
+### use this loss funtion in train_sdf.py with overfit_plane.yaml
 def occ_sigmoid(model_output, gt, model, cfg=None, first_state_dict=None):
     gt_sdf = gt["sdf"]
     pred_sdf = model_output["model_out"]
-    if cfg.kl_weight > 0 and first_state_dict is not None: ### kl_weight is 0
+
+    ### kl_weight is 0 in overfit_plane.yaml
+    ### So we don't use this part
+    if cfg.kl_weight > 0 and first_state_dict is not None: 
         param_arr = []
         for param in model.parameters():
             param_arr.append(param.flatten())
@@ -314,6 +317,8 @@ def occ_sigmoid(model_output, gt, model, cfg=None, first_state_dict=None):
             "occupancy": F.binary_cross_entropy(pred_sdf, gt_sdf),
             "kl_weight": cfg.kl_weight * kl_loss,
         }
+    
+    ### We use this part
     else:
         loss = F.binary_cross_entropy_with_logits(
             pred_sdf.squeeze(-1), gt_sdf.squeeze(-1), reduction="none"

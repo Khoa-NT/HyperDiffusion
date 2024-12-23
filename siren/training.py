@@ -40,7 +40,7 @@ def train(
             gamma=cfg.scheduler.gamma,
             verbose=True,
         )
-    elif cfg.scheduler.type == "adaptive":
+    elif cfg.scheduler.type == "adaptive": ### type: adaptive in overfit_plane.yaml
         scheduler = ReduceLROnPlateau(
             optim,
             patience=cfg.scheduler.patience_adaptive,
@@ -80,6 +80,8 @@ def train(
 
     with tqdm(total=len(train_dataloader) * epochs) as pbar:
         train_losses = []
+        
+        ### In the paper, they said they train the MLP in 800 epochs but the overfit_plane.yaml shows `epochs: 5000`
         for epoch in range(epochs):
             # if not epoch % epochs_til_checkpoint and epoch:
             #     torch.save(model.state_dict(),

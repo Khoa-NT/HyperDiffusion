@@ -48,6 +48,7 @@ def get_model(cfg):
     config_name="overfit_plane",
 )
 def main(cfg: DictConfig):
+    ### Initialize wandb
     wandb.init(
         project="hyperdiffusion_overfitting",
         dir=cfg.wandb_dir,
@@ -56,27 +57,41 @@ def main(cfg: DictConfig):
     )
     first_state_dict = None
 
+
+    ### Weight initialization training strategy
     ### cfg.strategy = first_weights or save_pc
     if cfg.strategy == "same_init":
         first_state_dict = get_model(cfg).state_dict()
     x_0s = []
 
+
     ### Temporarily disable the struct flag to allow creating new keys.
+    ### Why they don't do the interpolation in the cfg
     ### Ref: https://omegaconf.readthedocs.io/en/latest/usage.html#struct-flag
-    with open_dict(cfg): 
+    with open_dict(cfg):
         cfg.mlp_config.output_type = cfg.output_type ### "occ"
-        
+
+    ### Learning rate
     curr_lr = cfg.lr
+
+    ### Root path
     root_path = os.path.join(cfg.logging_root, cfg.exp_name)
+
+    ### Mesh jittering
     mesh_jitter = cfg.mesh_jitter # False
+
+    ### Multi-process
     multip_cfg = cfg.multi_process
+
+    ### Get all files (maybe `file.obj`) in the dataset folder except for train_split.lst, test_split.lst, and val_split.lst
     files = [
         file
-        for file in os.listdir(cfg.dataset_folder)
+        for file in os.listdir(cfg.dataset_folder) ### cfg.dataset_folder = "./data/02691156"
         if file not in ["train_split.lst", "test_split.lst", "val_split.lst"]
     ]
 
-    ### multip_cfg.enabled = False
+    ### If multi-process is enabled
+    ### multip_cfg.enabled = False in settings
     if multip_cfg.enabled:
         if multip_cfg.ignore_first:
             files = files[1:]  # Ignoring the first one
@@ -93,26 +108,37 @@ def main(cfg: DictConfig):
             f"Proc {multip_cfg.part_id} is responsible between {start_index} -> {end_index}"
         )
 
+    ### Lengths and names
     lengths = []
     names = []
+
+    ### Get all object names in the train_split.lst file
+    ### and convert them to a set to remove duplicates
     train_object_names = np.genfromtxt(
         os.path.join(cfg.dataset_folder, "train_split.lst"), dtype="str"
     )
     train_object_names = set(train_object_names)
+
+    ### Iterate over all files
     for i, file in enumerate(files):
+        ### This for-loop is useless because we don't use mesh jittering anymore
+        ### Consider for-loop with 1 iteration
         # We used to have mesh jittering for augmentation but not using it anymore
         for j in range(10 if mesh_jitter and i > 0 else 1):
             # Quick workaround to rename from obj to off
             # if file.endswith(".obj"):
             #     file = file[:-3] + "off"
 
+            ### if the file is not in the train_object_names set
             if not (file in train_object_names):
                 print(f"File {file} not in train_split")
                 continue
 
+            ### Get the filename without the extension
             filename = file.split(".")[0]
             filename = f"{filename}_jitter_{j}"
 
+            ### Load the SDF dataset
             sdf_dataset = dataio.PointCloud(
                 os.path.join(cfg.dataset_folder, file),
                 on_surface_points=cfg.batch_size, # 2048
@@ -122,16 +148,23 @@ def main(cfg: DictConfig):
                 n_points=cfg.n_points, # 100000
                 cfg=cfg,
             )
+
+            ### Run 1 batch at a time
             dataloader = DataLoader(
                 sdf_dataset, shuffle=True, batch_size=1, pin_memory=True, num_workers=0
             )
+
+            ### In the phase of preparing the dataset, only running `save_pc` in the dataio.PointCloud class
             if cfg.strategy == "save_pc":
                 continue
+
+            ### For diagnosing the dataset
             elif cfg.strategy == "diagnose":
                 lengths.append(len(sdf_dataset.coords))
                 names.append(file)
                 continue
-
+            
+            ### Loading the model MLP3D
             # Define the model.
             model = get_model(cfg).cuda()
 
@@ -151,6 +184,10 @@ def main(cfg: DictConfig):
             if os.path.exists(checkpoint_path):
                 print("Checkpoint exists:", checkpoint_path)
                 continue
+
+
+            ### strategy is "first_weights" in overfit_plane.yaml
+            ### Doesn't do anything in these if-else statements
             if cfg.strategy == "remove_bad":
                 model.load_state_dict(torch.load(checkpoint_path))
                 model.eval()
@@ -176,6 +213,8 @@ def main(cfg: DictConfig):
             ):
                 print("loaded")
                 model.load_state_dict(first_state_dict)
+
+
 
             training.train(
                 model=model,

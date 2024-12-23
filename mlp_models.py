@@ -86,14 +86,20 @@ class MLP3D(nn.Module):
         self.layers.append(nn.Linear(hidden_neurons[-1], out_size, bias=use_bias))
 
     def forward(self, model_input):
+        ### Not sure why they need to run require_grad_(True)
         coords_org = model_input["coords"].clone().detach().requires_grad_(True)
+        
         x = coords_org
         x = self.embedder.embed(x)
+
         for i, layer in enumerate(self.layers[:-1]):
             x = layer(x)
             x = F.leaky_relu(x) if self.use_leaky_relu else F.relu(x)
+        
+        ### Output layer is linear
         x = self.layers[-1](x)
 
+        ### Output type is `occ` in overfit_plane.yaml
         if self.output_type == "occ":
             # x = torch.sigmoid(x)
             pass
@@ -103,6 +109,10 @@ class MLP3D(nn.Module):
             x = x
         else:
             raise f"This self.output_type ({self.output_type}) not implemented"
+        
+        ### This one is redundant 
+        ### because later they will use F.binary_cross_entropy_with_logits()
+        ### to calculate the loss as binary classification
         x = dist.Bernoulli(logits=x).logits
 
         return {"model_in": coords_org, "model_out": x}

@@ -502,7 +502,10 @@ class PointCloud(Dataset):
         self.faces = None
         self.move = cfg.mlp_config.move
         self.cfg = cfg
+
+        ### If the dataset is a mesh
         if is_mesh:
+            ### ----------------------------------------- Sample point cloud ----------------------------------------- ###
             if cfg.strategy == "save_pc":
                 ### Read the stl file
                 obj: trimesh.Trimesh = trimesh.load(path)
@@ -554,11 +557,18 @@ class PointCloud(Dataset):
                 print(point_cloud.shape, points.shape, occupancies.shape)
 
         else:
+            ### Load the point cloud from a .txt file
             point_cloud = np.genfromtxt(path)
+
         print("Finished loading point cloud")
+
+        ### Naming the folder for the point cloud 
+        ### based on the dataset name, number of points, 
+        ### and whether we want to sample inner and outer surface points
         if not cfg.in_out:
             pc_folder = os.path.dirname(path) + "_" + str(cfg.n_points) + "_pc"
         else:
+            ### If we want to sample inner and outer surface points
             pc_folder = (
                 os.path.dirname(path)
                 + "_"
@@ -567,8 +577,10 @@ class PointCloud(Dataset):
                 + f"{self.output_type}_in_out_{str(cfg.in_out)}"
             )
 
-        self.total_time = 16
 
+        ### ----------------------------------------- Animated mesh ----------------------------------------- ###
+        ### Sample time for the animated mesh
+        self.total_time = 16
         if self.move:
             folder_name = os.path.basename(path)
             anime_file_path = os.path.join(path, folder_name + ".anime")
@@ -638,7 +650,10 @@ class PointCloud(Dataset):
             print(nf, nv, nt)
             self.coords = np.array(self.coords)
             self.occupancies = np.array(self.occupancies)
+
+        ### ----------------------------------------- Save the point cloud (Preparing dataset) ----------------------------------------- ###
         elif cfg.strategy == "save_pc":
+        
             ### Redundant step here, they can just save with the point_cloud directly
             self.coords = point_cloud[:, :3]
             self.normals = point_cloud[:, 3:]
@@ -648,35 +663,56 @@ class PointCloud(Dataset):
 
             ### Export the .npy file
             np.save(os.path.join(pc_folder, os.path.basename(path)), point_cloud_xyz)
+        
+
+        ### ----------------------------------------- Load the point cloud (training SDF) ----------------------------------------- ###
         else:
-            ### Load .npy file
+            ### Load .npy which is the point cloud of a mesh
             point_cloud = np.load(
                 os.path.join(pc_folder, os.path.basename(path) + ".npy")
             )
             self.coords = point_cloud[:, :3]
             self.occupancies = point_cloud[:, 3]
 
-        if cfg.shape_modify == "half":
-            included_points = self.coords[:, 0] < 0
+
+        ### If we want to modify the shape
+        ### shape_modify: 'no' in settings
+        if cfg.shape_modify == "half": 
+            included_points = self.coords[:, 0] < 0 ### Only keep the points that are in the negative x-axis
             self.coords = self.coords[included_points]
             self.normals = self.normals[included_points]
 
+        ### batch_size
         self.on_surface_points = on_surface_points
 
     def __len__(self):
+        ### If the dataset is an animated mesh
         if self.move:
             return self.coords[0].shape[0] // self.on_surface_points
         return self.coords.shape[0] // self.on_surface_points
 
     def __getitem__(self, idx):
+        ### ----------------------------------------- Animated mesh ----------------------------------------- ###
+        ### Sample time for the animated mesh
         time = np.random.randint(0, self.total_time, size=self.total_time)
         if self.move:
             length = self.coords[0].shape[0]
             idx_size = self.on_surface_points // self.total_time
+        
+
+        ### ----------------------------------------- Point cloud ----------------------------------------- ###
         else:
+            ### Number of points in the point cloud
             length = self.coords.shape[0]
+
+            ### Number of points to sample on the surface
             idx_size = self.on_surface_points
+
+        ### Sample random points from the point cloud
         idx = np.random.randint(length, size=idx_size)
+
+
+        ### ----------------------------------------- Animated mesh ----------------------------------------- ###
         if self.cfg.mlp_config.move:
             coords = self.coords[time]
             coords = coords[:, idx]
@@ -694,9 +730,11 @@ class PointCloud(Dataset):
             return {"coords": torch.from_numpy(coords).float()}, {
                 "sdf": torch.from_numpy(occs)
             }
+        
+        
+        ### ----------------------------------------- Point cloud ----------------------------------------- ###
         coords = self.coords[idx]
         occs = self.occupancies[idx, None]
-
 
         return {"coords": torch.from_numpy(coords).float()}, {
             "sdf": torch.from_numpy(occs)

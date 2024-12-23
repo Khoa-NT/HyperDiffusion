@@ -138,6 +138,15 @@ def create_mesh_v2(
             )
 
 
+### From static mesh
+# sdf_meshing.create_mesh(
+#     sdf_decoder,
+#     os.path.join(cfg.logging_root, f"{cfg.exp_name}_ply", filename),
+#     N=256,
+#     level=0 ### Always 0
+#     if cfg.output_type == "occ" and cfg.out_act == "sigmoid" ### Always 0
+#     else 0,
+# )
 def create_mesh(
     decoder,
     filename=None,
@@ -145,8 +154,8 @@ def create_mesh(
     max_batch=64**3,
     offset=None,
     scale=None,
-    level=0,
-    time_val=-1,
+    level=0, ### Contour value of skimage.measure.marching_cubes()
+    time_val=-1, ### For animation meshes, we need to pass in the time value.
 ):
     start = time.time()
     ply_filename = filename
@@ -155,8 +164,8 @@ def create_mesh(
     decoder.eval()
 
     # NOTE: the voxel_origin is actually the (bottom, left, down) corner, not the middle
-    voxel_origin = [-0.5] * 3
-    voxel_size = -2 * voxel_origin[0] / (N - 1)
+    voxel_origin = [-0.5] * 3 ### The range is [-0.5, 0.5] in each dimension (while SIREN uses [-1, 1]). 
+    voxel_size = -2 * voxel_origin[0] / (N - 1) ### They use -2 because voxel_origin[0] is -0.5.
 
     overall_index = torch.arange(0, N**3, 1, out=torch.LongTensor())
     samples = torch.zeros(N**3, 4)
@@ -182,11 +191,11 @@ def create_mesh(
     while head < num_samples:
         # print(head)
         sample_subset = samples[head : min(head + max_batch, num_samples), 0:3].cuda()
-        if time_val >= 0:
+        if time_val >= 0: ### For animation meshes, we need to pass in the time value.
             sample_subset = torch.hstack(
                 (
                     sample_subset,
-                    torch.ones((sample_subset.shape[0], 1)).cuda() * time_val,
+                    torch.ones((sample_subset.shape[0], 1)).cuda() * time_val, ### Encode the time value.
                 )
             )
         samples[head : min(head + max_batch, num_samples), 3] = (
@@ -215,7 +224,7 @@ def convert_sdf_samples_to_ply(
     voxel_grid_origin,
     voxel_size,
     ply_filename_out,
-    level,
+    level, ### Contour value of skimage.measure.marching_cubes()
     offset=None,
     scale=None,
 ):
