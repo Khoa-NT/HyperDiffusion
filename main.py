@@ -33,13 +33,15 @@ sys.path.append("siren")
 )
 def main(cfg: DictConfig):
     Config.config = config = cfg
-    method = Config.get("method")
+    method = Config.get("method") ### Get method: hyper_3d
     mlp_kwargs = None
 
+    ### Get the MLP configuration
     # In HyperDiffusion, we need to know the specifications of MLPs that are used for overfitting
-    if "hyper" in method:
+    if "hyper" in method: ### method: hyper_3d
         mlp_kwargs = Config.config["mlp_config"]["params"]
 
+    ### Initialize WandB
     wandb.init(
         project="hyperdiffusion",
         dir=config["tensorboard_log_dir"],
@@ -53,21 +55,31 @@ def main(cfg: DictConfig):
     wandb_logger.log_text("config", ["config"], [[str(config)]])
     print("wandb", wandb.run.name, wandb.run.id)
 
+    ### Initialize datasets
     train_dt = val_dt = test_dt = None
 
+    ### Path to all the MLP's checkpoints
+    ### E.g., mlps_folder_train = ./mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
     # Although it says train, it includes all the shapes but we only extract training ones in WeightDataset
     mlps_folder_train = Config.get("mlps_folder_train")
 
+    ### --------- Get the model --------- ###
     # Initialize Transformer for HyperDiffusion
+    ### method: hyper_3d
     if "hyper" in method:
+        ### Get the MLP from the MLP's configuration
         mlp = get_mlp(mlp_kwargs)
+
+        ### Flatten the MLP's weights
         state_dict = mlp.state_dict()
         layers = []
         layer_names = []
         for l in state_dict:
             shape = state_dict[l].shape
-            layers.append(np.prod(shape))
+            layers.append(np.prod(shape)) ### Get the number of weights in each layer
             layer_names.append(l)
+
+        ### Create diffusion model
         model = Transformer(
             layers, layer_names, **Config.config["transformer_config"]["params"]
         ).cuda()
@@ -77,22 +89,41 @@ def main(cfg: DictConfig):
             **Config.config["unet_config"]["params"]
         ).float()
 
+    ### Get the path to the dataset list: train_split.lst, val_split.lst, test_split.lst
+    ### E.g., dataset_path = ./data/02691156
     dataset_path = os.path.join(Config.config["dataset_dir"], Config.config["dataset"])
+
+    ### Get the object names in the train_split.lst
     train_object_names = np.genfromtxt(
         os.path.join(dataset_path, "train_split.lst"), dtype="str"
     )
+
+    ### If static MLPs are used, remove the .obj extension
+    ### E.g., e4665d76bf8fc441536d5be52cb9d26a.obj -> e4665d76bf8fc441536d5be52cb9d26a
     if not cfg.mlp_config.params.move:
         train_object_names = set([str.split(".")[0] for str in train_object_names])
+
+    ### -------------------------------------------------------------------------- Dataset -------------------------------------------------------------------------- ###
+    ### Check if dataset folder already has train,test,val split; create otherwise.
     # Check if dataset folder already has train,test,val split; create otherwise.
-    if method == "hyper_3d":
+    ### method = "hyper_3d" in train_plane.yaml
+    if method == "hyper_3d": 
         mlps_folder_all = mlps_folder_train
+
+        ### --------- Split the dataset --------- ###
+        ### This is how they split the dataset into train(80%), val(5%), test(15%)
+
+        ### Get all the object names besides `.lst` files
+        ### Properly empty because current dataset_path directory only contains .lst files
         all_object_names = np.array(
             [obj for obj in os.listdir(dataset_path) if ".lst" not in obj]
         )
-        total_size = len(all_object_names)
-        val_size = int(total_size * 0.05)
-        test_size = int(total_size * 0.15)
-        train_size = total_size - val_size - test_size
+        total_size = len(all_object_names)  ### 0
+        val_size = int(total_size * 0.05)   ### 0
+        test_size = int(total_size * 0.15)  ### 0
+        train_size = total_size - val_size - test_size  ### 0
+
+        ### If the train_split.lst does not exist, create it
         if not os.path.exists(os.path.join(dataset_path, "train_split.lst")):
             ### Random choice in `range(total_size)` with size `train_size + val_size`
             ### No duplication
@@ -146,6 +177,7 @@ def main(cfg: DictConfig):
                 fmt="%s",
             )
 
+        ### --------- Get the object names in the *.lst files --------- ###
         val_object_names = np.genfromtxt(
             os.path.join(dataset_path, "val_split.lst"), dtype="str"
         )
@@ -156,6 +188,8 @@ def main(cfg: DictConfig):
         test_object_names = set([str.split(".")[0] for str in test_object_names])
         # assert len(train_object_names) == train_size, f"{len(train_object_names)} {train_size}"
 
+        ### train_object_names is already readed above
+        ### So weird that they read it first, then create the lst files ...
         train_dt = WeightDataset(
             mlps_folder_train,
             wandb_logger,

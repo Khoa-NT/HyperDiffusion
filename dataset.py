@@ -148,25 +148,44 @@ class WeightDataset(Dataset):
     def __init__(
         self, mlps_folder, wandb_logger, model_dims, mlp_kwargs, cfg, object_names=None
     ):
+        ### Path to all the MLP's checkpoints
         self.mlps_folder = mlps_folder
-        self.condition = cfg.transformer_config.params.condition
+
+        ### condition: 'no' in train_plane.yaml
+        self.condition = cfg.transformer_config.params.condition 
+        
+        ### Get all the files in the MLP's folder
         files_list = list(os.listdir(mlps_folder))
+
+        ### Black list
         blacklist = {}
-        if cfg.filter_bad:
+        if cfg.filter_bad: ### filter_bad: True in train_plane.yaml
+            ### Read filter_bad_path: ./data/plane_problematic_shapes.txt
             blacklist = set(np.genfromtxt(cfg.filter_bad_path, dtype=str))
+
+        ### Check the name list
         if object_names is None:
+            ### Get all the names from the name of checkpoints
             self.mlp_files = [file for file in list(os.listdir(mlps_folder))]
         else:
             self.mlp_files = []
+            ### Get only the names from the input name list
             for file in list(os.listdir(mlps_folder)):
+
+                ### They exclude black listed shapes:
+                ### ≈ 15% of airplane, ≈ 16% of chair and ≈ 51% of car shapes 
+                ### in our train split of ShapeNet [1] contain major self-intersections
                 # Excluding black listed shapes
                 if cfg.filter_bad and file.split("_")[1] in blacklist:
                     continue
+
+                ### Check if file name is correct with their format
                 # Check if file is in corresponding split (train, test, val)
                 # In fact, only train split is important here because we don't use test or val MLP weights
                 if ("_" in file and (file.split("_")[1] in object_names or (
                         file.split("_")[1] + "_" + file.split("_")[2]) in object_names)) or (file in object_names):
                     self.mlp_files.append(file)
+
         self.transform = None
         self.logger = wandb_logger
         self.model_dims = model_dims
