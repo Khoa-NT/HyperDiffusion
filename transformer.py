@@ -371,13 +371,15 @@ class FrequencyEmbedder(nn.Module):
         super().__init__()
         frequencies = 2 ** torch.linspace(0, max_freq_log2, steps=num_frequencies)
         self.register_buffer("frequencies", frequencies)
+        self.device = device
 
     def forward(self, x):
         # x should be of size (N,) or (N, D)
         N = x.size(0)
         if x.dim() == 1:  # (N,)
             x = x.unsqueeze(1)  # (N, D) where D=1
-        x_unsqueezed = x.unsqueeze(-1).to("cuda", torch.float)  # (N, D, 1)
+        # x_unsqueezed = x.unsqueeze(-1).to("cuda", torch.float)  # (N, D, 1)
+        x_unsqueezed = x.unsqueeze(-1).to(torch.float)  # (N, D, 1)
         scaled = (
             self.frequencies.view(1, 1, -1) * x_unsqueezed
         )  # (N, D, num_frequencies)
@@ -394,7 +396,12 @@ class Transformer(nn.Module):
     """
     The G.pt model.
     """
-
+# n_embd: 2880  ### The channel dim
+# n_layer: 12   ### n layers in each block
+# n_head: 16    ### n head in attention layer
+# split_policy: layer_by_layer
+# use_global_residual: False
+# condition: 'no'
     def __init__(
         self,
         parameter_sizes,  # A list of integers indicating the total number of parameters in each layer
@@ -525,6 +532,14 @@ class Transformer(nn.Module):
 
 
 if __name__ == "__main__":
+    ### Added by Khoa
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cuda")
+    print(f"Run code in {device}")
+
+    ### Create MLP
     mlp = MLP(
         in_size=6,
         out_size=1,
@@ -532,19 +547,24 @@ if __name__ == "__main__":
         use_tanh=True,
         over_param=False,
     )
+    ### Get weights
     state_dict = mlp.state_dict()
+
+    ### Create weights input
     layers = []
     layer_names = []
     input = []
+
     for l in state_dict:
         shape = state_dict[l].shape
         layers.append(np.prod(shape))
         layer_names.append(l)
         input.append(state_dict[l].flatten())
-    input = torch.hstack(input).unsqueeze(0).cuda()
+    input = torch.hstack(input).unsqueeze(0).to(device)
+    
 
-    net = Transformer(layers, layer_names, split_policy="layer_by_layer").cuda()
-    t = torch.randint(0, 1000, (len(input), 1)).cuda()
+    net = Transformer(layers, layer_names, split_policy="layer_by_layer").to(device)
+    t = torch.randint(0, 1000, (len(input), 1)).to(device)
     print(input.shape, t.shape)
     out = net(input, t)
     print(out.shape)
