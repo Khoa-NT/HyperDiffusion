@@ -63,7 +63,7 @@ def main(cfg: DictConfig):
     # Although it says train, it includes all the shapes but we only extract training ones in WeightDataset
     mlps_folder_train = Config.get("mlps_folder_train")
 
-    ### --------- Get the model --------- ###
+    ### --------- Get the diffusion model --------- ###
     # Initialize Transformer for HyperDiffusion
     ### method: hyper_3d
     if "hyper" in method:

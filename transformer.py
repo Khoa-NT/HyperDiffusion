@@ -110,13 +110,23 @@ class GPT(nn.Module):
         super().__init__()
 
         # Determine how many parameters are placed into each individual Transformer token:
+        ### The split_policy="layer_by_layer" in config file
+        ### Convert the nested list (input_parameter_sizes) to a flat list (self.input_splits)
+        ### E.g., input_parameter_sizes = [[96, 16, 256, 16, 256, 16, 16, 1], [257]]
+        ### self.input_splits = [96, 16, 256, 16, 256, 16, 16, 1, 257]
         self.input_splits = self.build_splits(
             input_parameter_sizes, split_policy, chunk_size
         )
+        ### The same as input_parameter_sizes
+        ### Convert the nested list (output_parameter_sizes) to a flat list (self.output_splits)
+        ### E.g., output_parameter_sizes = [[96, 16, 256, 16, 256, 16, 16, 1]]
+        ### self.output_splits = [96, 16, 256, 16, 256, 16, 16, 1]
         self.output_splits = self.build_splits(
             output_parameter_sizes, split_policy, chunk_size
         )
         print(f"Using following input parameter splits: {self.input_splits}")
+        
+        ### The number of items (Weights, biases, etc.) in the input_parameter_names
         block_size = len(self.input_splits)
         print(input_parameter_names)
         if split_policy == "layer_by_layer":
@@ -125,13 +135,15 @@ class GPT(nn.Module):
             input_parameter_names = ["null"] * block_size
 
         # input embedding stem
+        ### positional embedding for each token in transformer
         self.pos_emb = nn.Parameter(torch.zeros(1, block_size, n_embd))
         self.drop = nn.Dropout(embd_pdrop)
+
         # transformer
+        ### Transformer blocks (SelfAttention + MLP)
         self.blocks = nn.Sequential(
             *[Block(n_embd, n_head, attn_pdrop, resid_pdrop) for _ in range(n_layer)]
         )
-
         self.block_size = block_size
 
         # Per-token encoder layers:
@@ -178,6 +190,7 @@ class GPT(nn.Module):
             output_parameter_projections.append(out_proj)
         return output_parameter_projections
 
+    ### Doesn't seem to be used in the code
     def get_block_size(self):
         return self.block_size
 
@@ -396,12 +409,15 @@ class Transformer(nn.Module):
     """
     The G.pt model.
     """
+### For GPT model:
 # n_embd: 2880  ### The channel dim
 # n_layer: 12   ### n layers in each block
 # n_head: 16    ### n head in attention layer
-# split_policy: layer_by_layer
-# use_global_residual: False
-# condition: 'no'
+# split_policy: layer_by_layer ### Each layer is one token
+
+### For Transformer init:
+# use_global_residual: False ### No global residual connection. They did implement it in the code but not used. Maybe it was originally for the G.pt paper.
+# condition: 'no' ### Can't find the usage of this variable in the code. WeightDataset define this variable but not used either.
     def __init__(
         self,
         parameter_sizes,  # A list of integers indicating the total number of parameters in each layer
@@ -423,18 +439,30 @@ class Transformer(nn.Module):
         self.condition = condition
         self.condition_n_points = condition_n_points
         self.use_global_residual = use_global_residual
+
+        ### Compute the token sizes
+        ### Based on the weight's sizes and names.
         (
-            input_parameter_sizes,
-            output_parameter_sizes,
-            input_parameter_names,
+            input_parameter_sizes,  ### parameter_sizes + other parameters (e.g., timestep, embedding, etc.)
+            output_parameter_sizes, ### parameter_sizes (The mlps' weights)
+            input_parameter_names,  ### parameter_names + other parameters names (e.g., timestep, embedding, etc.)
         ) = self.compute_token_sizes(parameter_sizes, parameter_names, num_frequencies)
+
+        print(f"input_parameter_sizes: {input_parameter_sizes}") ### [[96, 16, 256, 16, 256, 16, 16, 1], [257]]
+        print(f"output_parameter_sizes: {output_parameter_sizes}") ### [[96, 16, 256, 16, 256, 16, 16, 1]]
+        print(f"input_parameter_names: {input_parameter_names}") ### ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias', 'timestep_embedding']
+
         self.input_parameter_sizes = input_parameter_sizes
+
+        ### Create the GPT model
         self.decoder = GPT(
             input_parameter_sizes,
             output_parameter_sizes,
             input_parameter_names,
             **gpt_kwargs,
         )
+
+        ### Timestep embedding
         self.scalar_embedder = FrequencyEmbedder(num_frequencies, max_freq_log2)
 
         # Initialize with identity output:
@@ -487,6 +515,7 @@ class Transformer(nn.Module):
         """
         return GPT.configure_optimizers(self, lr, wd, betas)
 
+    ### Have no idea what this function is for because it is not used in the code.
     @torch.no_grad()
     def gradient_norm(self):
         """
@@ -499,6 +528,7 @@ class Transformer(nn.Module):
         total_norm = total_norm**0.5
         return total_norm
 
+    ### The forward pass of the Transformer
     def forward(self, x, t, x_prev=None):
         """
         Full G.pt forward pass.
@@ -517,17 +547,24 @@ class Transformer(nn.Module):
         """
         t_embedding = self.scalar_embedder(t)
         # loss_embedding = self.embed_loss(loss_target, loss_prev)
+
+        ### self.use_global_residual=False in config file
         if self.use_global_residual:
             x_prev = x_prev.unsqueeze(0).repeat((len(x), 1))
             assert x.shape == x_prev.shape
             inp = [x, x_prev, t_embedding]
         else:
             inp = [x, t_embedding]
+        
+        ### Why cat 1?
         inp = torch.cat(inp, 1)
         output = self.decoder(inp)
+
+        ### self.use_global_residual=False in config file
         # TODO: Global residual connection:
         if self.use_global_residual:
             output = output + x_prev
+
         return output
 
 
@@ -561,10 +598,13 @@ if __name__ == "__main__":
         layer_names.append(l)
         input.append(state_dict[l].flatten())
     input = torch.hstack(input).unsqueeze(0).to(device)
-    
 
+    ### Create Transformer
     net = Transformer(layers, layer_names, split_policy="layer_by_layer").to(device)
+
+    ### Random timestep
     t = torch.randint(0, 1000, (len(input), 1)).to(device)
-    print(input.shape, t.shape)
+    print(f"{input.shape}, {t.shape}")
+
     out = net(input, t)
-    print(out.shape)
+    print(f"{out.shape}")
