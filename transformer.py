@@ -146,12 +146,16 @@ class GPT(nn.Module):
         )
         self.block_size = block_size
 
+        ### Create the projection layer for each token before feed into the Transformer blocks
+        ### Input_weight --MLP--> n_embd
         # Per-token encoder layers:
         self.input_parameter_projections = self.build_encoder(
             n_embd, encoder_depth, self.input_splits
         )
         self.ln_in = nn.LayerNorm(n_embd)
 
+        ### Create the projection layer for each token after feed into the Transformer blocks
+        ### n_embd --MLP--> output_parameter_sizes
         # Per-token decoder layers:
         self.ln_f = nn.LayerNorm(n_embd)
         self.output_parameter_projections = self.build_decoder(
@@ -167,6 +171,8 @@ class GPT(nn.Module):
     def build_encoder(n_embd, encoder_depth, input_splits):
         # Create a unique MLP encoder for each token
         input_parameter_projections = nn.ModuleList()
+        
+        ### self.input_splits = [96, 16, 256, 16, 256, 16, 16, 1, 257]
         for param_chunk_size in input_splits:
             in_proj = [nn.Linear(param_chunk_size, n_embd, bias=False)]
             for _ in range(encoder_depth - 1):
@@ -174,12 +180,15 @@ class GPT(nn.Module):
                 in_proj.append(nn.Linear(n_embd, n_embd, bias=False))
             in_proj = nn.Sequential(*in_proj)
             input_parameter_projections.append(in_proj)
+
         return input_parameter_projections
 
     @staticmethod
     def build_decoder(n_embd, decoder_depth, output_splits):
         # Create a unique MLP decoder for each noised token
         output_parameter_projections = nn.ModuleList()
+
+        ### self.output_splits = [96, 16, 256, 16, 256, 16, 16, 1]
         for output_chunk_size in output_splits:
             out_proj = []
             for _ in range(decoder_depth - 1):
@@ -188,6 +197,7 @@ class GPT(nn.Module):
             out_proj.append(nn.Linear(n_embd, output_chunk_size, bias=False))
             out_proj = nn.Sequential(*out_proj)
             output_parameter_projections.append(out_proj)
+
         return output_parameter_projections
 
     ### Doesn't seem to be used in the code
