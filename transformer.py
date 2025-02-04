@@ -162,6 +162,7 @@ class GPT(nn.Module):
             n_embd, decoder_depth, self.output_splits
         )
 
+        ### E.g., self.output_splits = [96, 16, 256, 16, 256, 16, 16, 1]
         self.num_output_heads = len(self.output_splits)
         self.apply(self._init_weights)
 
@@ -287,6 +288,9 @@ class GPT(nn.Module):
         stack projected chunks along the sequence (token) dimension.
         """
         assert parameters.dim() == 2
+
+        ### With self.input_splits = [96, 16, 256, 16, 256, 16, 16, 1, 257]
+        ### Split the parameters into 9 chunks
         split_parameters = torch.split(parameters, self.input_splits, dim=1)
         representations = []
         for parameter, in_proj in zip(
@@ -371,19 +375,34 @@ class GPT(nn.Module):
         return splits
 
     def forward(self, x):
+        ### Encode the parameters --MLP--> n_embd
         embeddings = self.encode_parameters(x)
+
+        ### Batch size, number of Weights and Biases, embedding dimension
         b, t, d = embeddings.size()
+
+        ### Check if the number of tokens is correct
         assert (
             t == self.block_size
         ), f"Expected {self.block_size} tokens on dim=1, but got {t}"
 
         # forward the GPT model
+        ### Get the positional embedding for each token 
+        ### from pos_emb (1, n_weight, n_embd)
         position_embeddings = self.pos_emb[
             :, :t, :
         ]  # each position maps to a (learnable) vector
+
+        ### Then sum the embeddings and the positional embeddings
         x = self.drop(embeddings + position_embeddings)
+
+        ### Pass the embeddings through the Transformer blocks
         x = self.blocks(x)
+
+        ### Normalize the embeddings
         x = self.ln_f(x)
+
+        ### Decode the embeddings --MLP--> output_parameter_sizes
         x = self.decode_parameters(x)
 
         return x
@@ -563,7 +582,8 @@ class Transformer(nn.Module):
             x_prev = x_prev.unsqueeze(0).repeat((len(x), 1))
             assert x.shape == x_prev.shape
             inp = [x, x_prev, t_embedding]
-        else:
+
+        else: ### Will enter this branch
             inp = [x, t_embedding]
         
         ### Why cat 1?

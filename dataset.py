@@ -167,7 +167,8 @@ class WeightDataset(Dataset):
         if object_names is None:
             ### Get all the names from the name of checkpoints
             self.mlp_files = [file for file in list(os.listdir(mlps_folder))]
-        else:
+        
+        else: ### Will go to this case
             self.mlp_files = []
             ### Get only the names from the input name list
             for file in list(os.listdir(mlps_folder)):
@@ -190,14 +191,21 @@ class WeightDataset(Dataset):
         self.logger = wandb_logger
         self.model_dims = model_dims
         self.mlp_kwargs = mlp_kwargs
-        if cfg.augment in ["permute", "permute_same", "sort_permute"]:
+
+        ### augment: False in train_plane.yaml
+        if cfg.augment in ["permute", "permute_same", "sort_permute"]: 
             self.example_mlp = get_mlp(mlp_kwargs)
+
         self.cfg = cfg
+
+        ### There is no first_weight_name in train_plane.yaml
         if "first_weight_name" in cfg and cfg.first_weight_name is not None:
             self.first_weights = self.get_weights(
                 torch.load(os.path.join(self.mlps_folder, cfg.first_weight_name))
             ).float()
-        else:
+
+        else: ### Will go to this case
+            ### It looks like first_weight_name is not used
             self.first_weights = torch.tensor([0])
 
     def get_weights(self, state_dict):
@@ -235,8 +243,13 @@ class WeightDataset(Dataset):
         return weights, prev_weights
 
     def __getitem__(self, index):
+        ### Get the file name
         file = self.mlp_files[index]
+
+        ### Get the path of the file
         dir = join(self.mlps_folder, file)
+        
+        ### Check if the file is a directory
         if os.path.isdir(dir):
             path1 = join(dir, "checkpoints", "model_final.pth")
             path2 = join(dir, "checkpoints", "model_current.pth")

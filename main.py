@@ -104,7 +104,6 @@ def main(cfg: DictConfig):
         train_object_names = set([str.split(".")[0] for str in train_object_names])
 
     ### -------------------------------------------------------------------------- Dataset -------------------------------------------------------------------------- ###
-    ### Check if dataset folder already has train,test,val split; create otherwise.
     # Check if dataset folder already has train,test,val split; create otherwise.
     ### method = "hyper_3d" in train_plane.yaml
     if method == "hyper_3d": 
@@ -253,10 +252,13 @@ def main(cfg: DictConfig):
         input_data.min(),
         input_data.max(),
     )
+    ### -------------------------------------------------------------------------- End of Dataset -------------------------------------------------------------------------- ###
+
 
     best_model_save_path = Config.get("best_model_save_path")
     model_resume_path = Config.get("model_resume_path")
 
+    
     # Initialize HyperDiffusion
     ### input_data.shape = [B, n_weight]
     diffuser = HyperDiffusion(

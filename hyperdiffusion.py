@@ -90,6 +90,7 @@ class HyperDiffusion(pl.LightningModule):
         vox_grid.vertices = vert
         return vox_grid
 
+    ###
     def training_step(self, train_batch, batch_idx):
         # Extract input_data (either voxel or weight) which is the first element of the tuple
         input_data = train_batch[0]
