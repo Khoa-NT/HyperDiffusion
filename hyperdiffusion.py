@@ -90,17 +90,21 @@ class HyperDiffusion(pl.LightningModule):
         vox_grid.vertices = vert
         return vox_grid
 
-    ###
+    ### Training step from `trainer.fit` in main.py
     def training_step(self, train_batch, batch_idx):
         # Extract input_data (either voxel or weight) which is the first element of the tuple
         input_data = train_batch[0]
 
         # At the first step output first element in the dataset as a sanit check
         if "hyper" in self.method and self.trainer.global_step == 0:
+            print(f"\nFrom {self.__class__.__name__}")
+            
             ### curr_weights is not defined --> curr_weights=None
             curr_weights = Config.get("curr_weights")
+
             img = input_data[0].flatten()[:curr_weights] ### Get all weights
-            print(img.shape)
+            print(f"img.shape: {img.shape}")
+
             mlp = generate_mlp_from_weights(img, self.mlp_kwargs)
             sdf_decoder = SDFDecoder(
                 self.mlp_kwargs.model_type,

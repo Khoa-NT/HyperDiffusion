@@ -92,19 +92,19 @@ class GPT(nn.Module):
 
     def __init__(
         self,
-        input_parameter_sizes,
-        output_parameter_sizes,
-        input_parameter_names,
-        n_layer=12,
-        n_head=12,
-        n_embd=768,
+        input_parameter_sizes,  ### [[3456, 128, 16384, 128, 16384, 128, 128, 1], [257]]
+        output_parameter_sizes, ### [[3456, 128, 16384, 128, 16384, 128, 128, 1]]
+        input_parameter_names,  ### ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias', 'timestep_embedding']
+        n_layer=12,         ### n_layer: 12 in train_plane.yaml
+        n_head=12,          ### n_head: 16 in train_plane.yaml
+        n_embd=768,         ### n_embd: 2880 in train_plane.yaml
         encoder_depth=1,
         decoder_depth=1,
         attn_pdrop=0.0,
         resid_pdrop=0.0,
         embd_pdrop=0.0,
         chunk_size=None,
-        split_policy="chunk",
+        split_policy="chunk", ### split_policy: layer_by_layer in train_plane.yaml
     ):
         # parameter_sizes is a list of integers indicating how many parameters are in each layer
         super().__init__()
@@ -112,19 +112,20 @@ class GPT(nn.Module):
         # Determine how many parameters are placed into each individual Transformer token:
         ### The split_policy="layer_by_layer" in config file
         ### Convert the nested list (input_parameter_sizes) to a flat list (self.input_splits)
-        ### E.g., input_parameter_sizes = [[96, 16, 256, 16, 256, 16, 16, 1], [257]]
-        ### self.input_splits = [96, 16, 256, 16, 256, 16, 16, 1, 257]
+        ### E.g., input_parameter_sizes = [[3456, 128, 16384, 128, 16384, 128, 128, 1], [257]]
+        ### self.input_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1, 257]
         self.input_splits = self.build_splits(
             input_parameter_sizes, split_policy, chunk_size
         )
         ### The same as input_parameter_sizes
         ### Convert the nested list (output_parameter_sizes) to a flat list (self.output_splits)
-        ### E.g., output_parameter_sizes = [[96, 16, 256, 16, 256, 16, 16, 1]]
-        ### self.output_splits = [96, 16, 256, 16, 256, 16, 16, 1]
+        ### E.g., output_parameter_sizes = [[3456, 128, 16384, 128, 16384, 128, 128, 1]]
+        ### self.output_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1]
         self.output_splits = self.build_splits(
             output_parameter_sizes, split_policy, chunk_size
         )
-        print(f"Using following input parameter splits: {self.input_splits}")
+        print(f"Using following input parameter splits: {self.input_splits}")   ### [3456, 128, 16384, 128, 16384, 128, 128, 1, 257]
+        print(f"Using following output parameter splits: {self.output_splits}") ### [3456, 128, 16384, 128, 16384, 128, 128, 1]
         
         ### The number of items (Weights, biases, etc.) in the input_parameter_names
         block_size = len(self.input_splits)
@@ -156,13 +157,14 @@ class GPT(nn.Module):
 
         ### Create the projection layer for each token after feed into the Transformer blocks
         ### n_embd --MLP--> output_parameter_sizes
+        ### self.output_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1]
         # Per-token decoder layers:
         self.ln_f = nn.LayerNorm(n_embd)
         self.output_parameter_projections = self.build_decoder(
             n_embd, decoder_depth, self.output_splits
         )
 
-        ### E.g., self.output_splits = [96, 16, 256, 16, 256, 16, 16, 1]
+        ### E.g., self.output_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1]
         self.num_output_heads = len(self.output_splits)
         self.apply(self._init_weights)
 
@@ -173,7 +175,7 @@ class GPT(nn.Module):
         # Create a unique MLP encoder for each token
         input_parameter_projections = nn.ModuleList()
         
-        ### self.input_splits = [96, 16, 256, 16, 256, 16, 16, 1, 257]
+        ### self.input_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1, 257]
         for param_chunk_size in input_splits:
             in_proj = [nn.Linear(param_chunk_size, n_embd, bias=False)]
             for _ in range(encoder_depth - 1):
@@ -189,12 +191,17 @@ class GPT(nn.Module):
         # Create a unique MLP decoder for each noised token
         output_parameter_projections = nn.ModuleList()
 
-        ### self.output_splits = [96, 16, 256, 16, 256, 16, 16, 1]
+        ### self.output_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1]
         for output_chunk_size in output_splits:
             out_proj = []
-            for _ in range(decoder_depth - 1):
+
+            ### decoder_depth: 1 in train_plane.yaml
+            ### It means this for loop will not run
+            for _ in range(decoder_depth - 1): 
                 out_proj.append(nn.Linear(n_embd, n_embd, bias=False))
                 out_proj.append(nn.GELU())
+
+            ### Create MLP for each token (Weights or Biases, etc individually)
             out_proj.append(nn.Linear(n_embd, output_chunk_size, bias=False))
             out_proj = nn.Sequential(*out_proj)
             output_parameter_projections.append(out_proj)
@@ -289,14 +296,15 @@ class GPT(nn.Module):
         """
         assert parameters.dim() == 2
 
-        ### With self.input_splits = [96, 16, 256, 16, 256, 16, 16, 1, 257]
+        ### With self.input_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1, 257]
         ### Split the parameters into 9 chunks
         split_parameters = torch.split(parameters, self.input_splits, dim=1)
+
         representations = []
-        for parameter, in_proj in zip(
-            split_parameters, self.input_parameter_projections
-        ):
+        for parameter, in_proj in zip(split_parameters, self.input_parameter_projections):
+            ### Apply individual MLP to each chunk (Weights or Biases, etc.)
             representations.append(in_proj(parameter))
+
         representations = torch.stack(representations, dim=1)  # (b, t, d)
         representations = self.ln_in(representations)
         assert representations.dim() == 3
@@ -307,13 +315,23 @@ class GPT(nn.Module):
         Apply a per-chunk decoding (only to the tokens corresponding to the noised/updated parameter vector),
         and concatenate them into a flattened parameter vector.
         """
-        assert features.dim() == 3  # (b, t, d)
+        assert features.dim() == 3  # (b, t, d) ### [B, token length, n_embd] ### [32, 9, 2880]
         output = []
+
+        ### E.g., self.output_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1]
+        ### self.num_output_heads = len(self.output_splits) = 8
         for t in range(self.num_output_heads):
+            ### Get the MLP corresponding to the t-th token
             out_proj = self.output_parameter_projections[t]
+
+            ### Apply the MLP to the t-th token
             output.append(out_proj(features[:, t, :]))
+
+        ### Concatenate the output of all the MLPs
+        ### output is a list of [B, output_chunk_size]
         output = torch.cat(output, 1)  # (b, c)
         assert output.dim() == 2
+
         return output
 
     @staticmethod
@@ -375,11 +393,16 @@ class GPT(nn.Module):
         return splits
 
     def forward(self, x):
+        print(f"\nFrom {self.__class__.__name__}")
+        print(f"x.shape: {x.shape}") ### [32, 36994] ### Batch size = 32 and 36994 = 36737 (parameters) + 257 (timestep embedding)
+
         ### Encode the parameters --MLP--> n_embd
         embeddings = self.encode_parameters(x)
+        print(f"embeddings.shape: {embeddings.shape}") ### [32, 9, 2880] ### [B, token length, n_embd] ### token length = 9 = 8 (weights or biases individually) + 1 (timestep embedding)
 
         ### Batch size, number of Weights and Biases, embedding dimension
         b, t, d = embeddings.size()
+        print(f"b: {b}, t: {t}, d: {d}") ### b: 32, t: 9, d: 2880
 
         ### Check if the number of tokens is correct
         assert (
@@ -392,18 +415,23 @@ class GPT(nn.Module):
         position_embeddings = self.pos_emb[
             :, :t, :
         ]  # each position maps to a (learnable) vector
+        print(f"position_embeddings.shape: {position_embeddings.shape}") ### [1, 9, 2880]
 
         ### Then sum the embeddings and the positional embeddings
         x = self.drop(embeddings + position_embeddings)
+        print(f"After `self.drop(embeddings + position_embeddings)`, x.shape: {x.shape}") ### [32, 9, 2880]
 
         ### Pass the embeddings through the Transformer blocks
         x = self.blocks(x)
+        print(f"After `self.blocks(x)`, x.shape: {x.shape}") ### [32, 9, 2880]
 
         ### Normalize the embeddings
         x = self.ln_f(x)
-
+        print(f"After `self.ln_f(x)`, x.shape: {x.shape}") ### [32, 9, 2880]
+        
         ### Decode the embeddings --MLP--> output_parameter_sizes
         x = self.decode_parameters(x)
+        print(f"After `self.decode_parameters(x)`, x.shape: {x.shape}") ### [32, 36737]
 
         return x
 
@@ -413,7 +441,7 @@ class FrequencyEmbedder(nn.Module):
         super().__init__()
         frequencies = 2 ** torch.linspace(0, max_freq_log2, steps=num_frequencies)
         self.register_buffer("frequencies", frequencies)
-        self.device = device
+        # self.device = device
 
     def forward(self, x):
         # x should be of size (N,) or (N, D)
@@ -449,8 +477,8 @@ class Transformer(nn.Module):
 # condition: 'no' ### Can't find the usage of this variable in the code. WeightDataset define this variable but not used either.
     def __init__(
         self,
-        parameter_sizes,  # A list of integers indicating the total number of parameters in each layer
-        parameter_names,  # A list of strings indicating the name of each layer in the input networks
+        parameter_sizes,  # A list of integers indicating the total number of parameters in each layer ### [3456, 128, 16384, 128, 16384, 128, 128, 1]
+        parameter_names,  # A list of strings indicating the name of each layer in the input networks ### ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias']
         num_frequencies=128,  # number of frequencies sampled for embedding scalars
         max_freq_log2=20,  # max log2 frequency for embedding scalars
         predict_xstart=True,  # if True, G.pt predicts signal (False = predict noise)
@@ -471,14 +499,18 @@ class Transformer(nn.Module):
 
         ### Compute the token sizes
         ### Based on the weight's sizes and names.
+        ### input_parameter_sizes: [[3456, 128, 16384, 128, 16384, 128, 128, 1], [257]]
+        ### output_parameter_sizes: [[3456, 128, 16384, 128, 16384, 128, 128, 1]]
+        ### input_parameter_names: ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias', 'timestep_embedding']
         (
             input_parameter_sizes,  ### parameter_sizes + other parameters (e.g., timestep, embedding, etc.)
             output_parameter_sizes, ### parameter_sizes (The mlps' weights)
             input_parameter_names,  ### parameter_names + other parameters names (e.g., timestep, embedding, etc.)
         ) = self.compute_token_sizes(parameter_sizes, parameter_names, num_frequencies)
 
-        print(f"input_parameter_sizes: {input_parameter_sizes}") ### [[96, 16, 256, 16, 256, 16, 16, 1], [257]]
-        print(f"output_parameter_sizes: {output_parameter_sizes}") ### [[96, 16, 256, 16, 256, 16, 16, 1]]
+        print(f"\nFrom {self.__class__.__name__}")
+        print(f"input_parameter_sizes: {input_parameter_sizes} ; total: {sum([sum(x) for x in input_parameter_sizes])}") ### [[3456, 128, 16384, 128, 16384, 128, 128, 1], [257]]
+        print(f"output_parameter_sizes: {output_parameter_sizes} ; total: {sum([sum(x) for x in output_parameter_sizes])}") ### [[3456, 128, 16384, 128, 16384, 128, 128, 1]]
         print(f"input_parameter_names: {input_parameter_names}") ### ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias', 'timestep_embedding']
 
         self.input_parameter_sizes = input_parameter_sizes
@@ -524,18 +556,30 @@ class Transformer(nn.Module):
 
         These lists are used by the GPT class above to determine how to split the input vector into different tokens.
         """
+        ### parameter_sizes: [3456, 128, 16384, 128, 16384, 128, 128, 1]
+        ### parameter_names: ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias']
+        ### num_frequencies: 128
+
+        ### This function will create lists for input_parameter_sizes, output_parameter_sizes, input_parameter_names:
+        ### input_parameter_sizes: [[3456, 128, 16384, 128, 16384, 128, 128, 1], [257]]
+        ### output_parameter_sizes: [[3456, 128, 16384, 128, 16384, 128, 128, 1]]
+        ### input_parameter_names: ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias', 'timestep_embedding']
+        
         input_parameter_sizes = [deepcopy(parameter_sizes)]
-        output_parameter_sizes = [deepcopy(parameter_sizes)]
+        output_parameter_sizes = [deepcopy(parameter_sizes)] ### Basically the same as parameter_sizes
         input_parameter_names = deepcopy(parameter_names)
+
         # account for the second weight vector that will be input:
         if self.use_global_residual:
             input_parameter_sizes.append(input_parameter_sizes[0])
             input_parameter_names.extend(input_parameter_names)
 
+        ### Calculate the size of the timestep embedding to add to the input
         # Account for the scalar inputs (diffusion timestep and loss/error/return inputs):
         scalar_token_size = [self.get_scalar_token_size(num_frequencies)]
         input_parameter_sizes.extend([scalar_token_size])
         input_parameter_names.extend(["timestep_embedding"])
+
         return input_parameter_sizes, output_parameter_sizes, input_parameter_names
 
     def configure_optimizers(self, lr, wd, betas):
@@ -574,7 +618,12 @@ class Transformer(nn.Module):
         returns: (N, D) tensor of denoised updated parameters
         ----------------------------------------------
         """
+        print(f"\nFrom {self.__class__.__name__}")
+        print(f"x.shape: {x.shape}") ### [32, 36737]
+
         t_embedding = self.scalar_embedder(t)
+        print(f"t_embedding.shape: {t_embedding.shape}") ### [32, 257]
+
         # loss_embedding = self.embed_loss(loss_target, loss_prev)
 
         ### self.use_global_residual=False in config file
@@ -586,9 +635,14 @@ class Transformer(nn.Module):
         else: ### Will enter this branch
             inp = [x, t_embedding]
         
-        ### Why cat 1?
+
+        ### Concate x and t_embedding along the channel dimension
+        ### inp.shape: [B, n_weight + timestep_embedding]
         inp = torch.cat(inp, 1)
+        print(f"After `inp = torch.cat(inp, 1)`, inp.shape: {inp.shape}") ### [32, 36994]
+
         output = self.decoder(inp)
+        print(f"output.shape: {output.shape}") ### [32, 36737]
 
         ### self.use_global_residual=False in config file
         # TODO: Global residual connection:
@@ -614,8 +668,11 @@ if __name__ == "__main__":
         use_tanh=True,
         over_param=False,
     )
+    print(f"\nmlp: {mlp}")
+
     ### Get weights
     state_dict = mlp.state_dict()
+    print(f"\nstate_dict: {state_dict}")
 
     ### Create weights input
     layers = []
@@ -628,13 +685,15 @@ if __name__ == "__main__":
         layer_names.append(l)
         input.append(state_dict[l].flatten())
     input = torch.hstack(input).unsqueeze(0).to(device)
+    print(f"\nlayers: {layers}")
+    print(f"layer_names: {layer_names}")
 
     ### Create Transformer
     net = Transformer(layers, layer_names, split_policy="layer_by_layer").to(device)
 
     ### Random timestep
     t = torch.randint(0, 1000, (len(input), 1)).to(device)
-    print(f"{input.shape}, {t.shape}")
+    print(f"\nInput and timestep shape: {input.shape}, {t.shape}")
 
     out = net(input, t)
-    print(f"{out.shape}")
+    print(f"\nOutput shape: {out.shape}")

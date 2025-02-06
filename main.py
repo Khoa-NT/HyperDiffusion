@@ -78,6 +78,9 @@ def main(cfg: DictConfig):
             shape = state_dict[l].shape
             layers.append(np.prod(shape)) ### Get the number of weights in each layer
             layer_names.append(l)
+        print("\nFrom main.py")
+        print(f"layers: {layers}") ### [3456, 128, 16384, 128, 16384, 128, 128, 1]
+        print(f"layer_names: {layer_names}") ### ['layers.0.weight', 'layers.0.bias', 'layers.1.weight', 'layers.1.bias', 'layers.2.weight', 'layers.2.bias', 'layers.3.weight', 'layers.3.bias']
 
         ### Create diffusion model
         model = Transformer(
@@ -246,11 +249,15 @@ def main(cfg: DictConfig):
         )
     )
     input_data = next(iter(train_dl))[0]
+
+    ### [batch_size, n_weight], n_weight is the total of the weights in the MLP.
+    ### timestep_embedding = num_frequencies * 2 + 1 = 128 * 2 + 1 = 257
+    ### The real size of the input data is [batch_size, n_weight + timestep_embedding] = [batch_size, 36737 + 257] = [batch_size, 36994]
     print(
         "Input data shape, min, max:",
-        input_data.shape,
-        input_data.min(),
-        input_data.max(),
+        input_data.shape,   ### torch.Size([32, 36737])
+        input_data.min(),   ### tensor(-21.4261)
+        input_data.max(),   ### tensor(13.2952)
     )
     ### -------------------------------------------------------------------------- End of Dataset -------------------------------------------------------------------------- ###
 

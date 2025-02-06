@@ -50,7 +50,7 @@ transformer_config:
   params:
     n_embd: 2880
     n_layer: 12
-    n_head: 16
+    n_head: 16    ### 2880 / 16 = 180 = n_embd per head
     split_policy: layer_by_layer ### each layer's parameters are contained in a SINGLE token, no mixing across layers or inputs
     use_global_residual: False
     condition: 'no'
