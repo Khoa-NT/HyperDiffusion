@@ -12,7 +12,7 @@ augment: False
 augment_amount: 0
 jitter_augment: False
 normalization_factor: 1
-timesteps: 500
+timesteps: 500       ### 500 diffusion steps
 epochs: 6000
 scheduler: True
 scheduler_step: 200
@@ -24,7 +24,7 @@ sampling: ddim
 val_fid_calculation_period: 15
 lr: 0.0002
 batch_size: 32
-accumulate_grad_batches: 1
+accumulate_grad_batches: 1 ### no accumulated grads
 val:
   num_points: 2048
   num_samples: 60
@@ -50,7 +50,7 @@ transformer_config:
   params:
     n_embd: 2880
     n_layer: 12
-    n_head: 16    ### 2880 / 16 = 180 = n_embd per head
+    n_head: 16    ### 2880 / 16 = 180 embedding per head
     split_policy: layer_by_layer ### each layer's parameters are contained in a SINGLE token, no mixing across layers or inputs
     use_global_residual: False
     condition: 'no'

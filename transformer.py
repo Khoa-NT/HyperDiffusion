@@ -108,6 +108,7 @@ class GPT(nn.Module):
     ):
         # parameter_sizes is a list of integers indicating how many parameters are in each layer
         super().__init__()
+        print(f"\nFrom {self.__class__.__name__} __init__")
 
         # Determine how many parameters are placed into each individual Transformer token:
         ### The split_policy="layer_by_layer" in config file
@@ -394,7 +395,7 @@ class GPT(nn.Module):
 
     def forward(self, x):
         print(f"\nFrom {self.__class__.__name__}")
-        print(f"x.shape: {x.shape}") ### [32, 36994] ### Batch size = 32 and 36994 = 36737 (parameters) + 257 (timestep embedding)
+        print(f"x.shape: {x.shape}") ### [32, 36994] ### Batch size = 100 and 36994 = 36737 (parameters) + 257 (timestep embedding)
 
         ### Encode the parameters --MLP--> n_embd
         embeddings = self.encode_parameters(x)
@@ -412,9 +413,7 @@ class GPT(nn.Module):
         # forward the GPT model
         ### Get the positional embedding for each token 
         ### from pos_emb (1, n_weight, n_embd)
-        position_embeddings = self.pos_emb[
-            :, :t, :
-        ]  # each position maps to a (learnable) vector
+        position_embeddings = self.pos_emb[:, :t, :]  # each position maps to a (learnable) vector
         print(f"position_embeddings.shape: {position_embeddings.shape}") ### [1, 9, 2880]
 
         ### Then sum the embeddings and the positional embeddings
@@ -430,8 +429,12 @@ class GPT(nn.Module):
         print(f"After `self.ln_f(x)`, x.shape: {x.shape}") ### [32, 9, 2880]
         
         ### Decode the embeddings --MLP--> output_parameter_sizes
+        ### Convert the embeddings back to the original parameter sizes on the parameter-tokens, except for the timestep embedding.
+        ### E.g., self.output_splits = [3456, 128, 16384, 128, 16384, 128, 128, 1]
+        ### each parameter-token is given into a MLP individually (1 MLP per parameter-token, not shared)
+        ### then concatenate all the MLPs' outputs together [3456, 128, 16384, 128, 16384, 128, 128, 1] --> [36737]
         x = self.decode_parameters(x)
-        print(f"After `self.decode_parameters(x)`, x.shape: {x.shape}") ### [32, 36737]
+        print(f"After `self.decode_parameters(x)`, x.shape: {x.shape}") ### [32, 36737] ### [B, total_parameters]
 
         return x
 
@@ -619,7 +622,7 @@ class Transformer(nn.Module):
         ----------------------------------------------
         """
         print(f"\nFrom {self.__class__.__name__}")
-        print(f"x.shape: {x.shape}") ### [32, 36737]
+        print(f"x.shape: {x.shape}") ### [32, 36737] (training batch size = 32, while test batch size = 100)
 
         t_embedding = self.scalar_embedder(t)
         print(f"t_embedding.shape: {t_embedding.shape}") ### [32, 257]

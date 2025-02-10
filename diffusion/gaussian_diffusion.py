@@ -119,40 +119,56 @@ class GaussianDiffusion:
     def __init__(
         self,
         *,
-        betas,
-        model_mean_type,
-        model_var_type,
-        loss_type,
-        diff_pl_module,
+        betas,                      ### betas.shape = [500]
+        model_mean_type,            ### START_X
+        model_var_type,             ### FIXED_LARGE
+        loss_type,                  ### MSE
+        diff_pl_module,             ### diff_pl_module: HyperDiffusion class
         rescale_timesteps=False,
     ):
-        self.model_mean_type = model_mean_type
-        self.model_var_type = model_var_type
-        self.loss_type = loss_type
-        self.rescale_timesteps = rescale_timesteps
-        self.diff_module = diff_pl_module
+        print(f"\nFrom {self.__class__.__name__}")
+
+        self.model_mean_type = model_mean_type      ### START_X
+        self.model_var_type = model_var_type        ### FIXED_LARGE
+        self.loss_type = loss_type                  ### MSE
+        self.rescale_timesteps = rescale_timesteps  ### False
+        self.diff_module = diff_pl_module           ### diff_pl_module: HyperDiffusion class. Will be used to register buffers.
+        
         # Use float64 for accuracy.
-        betas = np.array(betas, dtype=np.float64)
-        self.betas = betas
+        betas = np.array(betas, dtype=np.float64) ### Convert from torch to numpy. Why ?
+        self.betas = betas ### betas.shape = [500]
 
         assert len(betas.shape) == 1, "betas must be 1-D"
         assert (betas > 0).all() and (betas <= 1).all()
 
-        self.num_timesteps = int(betas.shape[0])
+        ### Get from betas.shape = [500]
+        self.num_timesteps = int(betas.shape[0]) ### 500
 
+        ### invert betas to get alphas
         alphas = 1.0 - betas
-        self.alphas_cumprod = np.cumprod(alphas, axis=0)
 
+        ### Create cumprod of alphas. For example, alphas_cumprod[1] = alphas[0] * alphas[1]
+        ### Then we will get the alphas based on the time step as index.
+        self.alphas_cumprod = np.cumprod(alphas, axis=0)
+        print(f"self.alphas_cumprod.shape: {self.alphas_cumprod.shape}") ### [500]
+
+        ### Create prev and next alphas_cumprod.
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
         assert self.alphas_cumprod_prev.shape == (self.num_timesteps,)
-        diff_pl_module.register_buffer("betas", torch.tensor(self.betas))
-        diff_pl_module.register_buffer("alphas", torch.tensor(self.betas))
-        diff_pl_module.register_buffer("alpha_hats", torch.tensor(self.betas))
-        diff_pl_module.register_buffer("alpha_hats_prev", torch.tensor(self.betas))
 
+        ### --------- Register buffers --------- ###
+        ### Save the betas as constant variables.
+        diff_pl_module.register_buffer("betas", torch.tensor(self.betas))
+
+        ### These lines are not used in this code.
+        diff_pl_module.register_buffer("alphas", torch.tensor(self.betas))          
+        diff_pl_module.register_buffer("alpha_hats", torch.tensor(self.betas))      ### Not used in this code
+        diff_pl_module.register_buffer("alpha_hats_prev", torch.tensor(self.betas)) ### Not used in this code
+
+        ### --------- Calculations --------- ###
         # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod)
+        self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod) ### [500]
         self.sqrt_one_minus_alphas_cumprod = np.sqrt(1.0 - self.alphas_cumprod)
         self.log_one_minus_alphas_cumprod = np.log(1.0 - self.alphas_cumprod)
         self.sqrt_recip_alphas_cumprod = np.sqrt(1.0 / self.alphas_cumprod)
@@ -207,10 +223,16 @@ class GaussianDiffusion:
         if noise is None:
             noise = th.randn_like(x_start)
         assert noise.shape == x_start.shape
+
+        ### _extract_into_tensor converts the numpy array to a tensor: numpy --> torch.
+        ### sqrt_alphas_cumprod.shape = [500] 
+        ### t.shape = [32]
+        ### x_start.shape = [32, 36737]
+        ### _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) --> sqrt_alphas_cumprod on time steps [32, 36737]
+        ### _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) --> sqrt_one_minus_alphas_cumprod on time steps [32, 36737]
         return (
             _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-            + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
-            * noise,
+            + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)* noise,
             noise,
         )
 
@@ -358,7 +380,7 @@ class GaussianDiffusion:
         ) / _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
 
     def _scale_timesteps(self, t):
-        if self.rescale_timesteps:
+        if self.rescale_timesteps: ### False in the train_plane configuration
             return t.float() * (1000.0 / self.num_timesteps)
         return t
 
@@ -765,15 +787,20 @@ class GaussianDiffusion:
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
         """
-        if model_kwargs is None:
+        if model_kwargs is None: ### model_kwargs is None in hyperdiffusion.py
             model_kwargs = {}
-        if noise is None:
+        if noise is None: ### noise is None in hyperdiffusion.py
             noise = th.randn_like(x_start)
+
+        ### Sample the noise from the Gaussian distribution based on the timestep t.
+        ### x_start is the MLP weights in this case.
+        ### x_t.shape = [32, 36737]
+        ### _ is the return noise which is not used in this case.
         x_t, _ = self.q_sample(x_start, t, noise=noise)
 
         terms = {}
 
-        ### self.loss_type = MSE
+        ### Not this branch
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:
             terms["loss"] = self._vb_terms_bpd(
                 model=model,
@@ -785,10 +812,17 @@ class GaussianDiffusion:
             )["output"]
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
+        
+        ### self.loss_type = MSE: This branch will be executed
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
+            ### self._scale_timesteps(t) will not doing anything in this case because self.rescale_timesteps = False.
+            ### Feed the input x_t and the time step t to the model (Transformer).
+            ### Check the forward method in Transformer.
+            ### Output of the model: model_output.shape = [32, 36737]
             model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
 
-            ### model_var_type: FIXED_LARGE
+            ### model_var_type: FIXED_LARGE in train_plane configuration
+            ### This branch will not be executed.
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,
@@ -811,21 +845,37 @@ class GaussianDiffusion:
                     # Without a factor of 1/1000, the VB term hurts the MSE term.
                     terms["vb"] *= self.num_timesteps / 1000.0
 
+            ### self.model_mean_type = START_X in train_plane configuration
+            ### Create the target dictionary for all the model_mean_type.
+            ### Then read the target value based on the model_mean_type specified in the configuration.
             target = {
                 ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
                     x_start=x_start, x_t=x_t, t=t
                 )[0],
-                ModelMeanType.START_X: x_start,
+                ModelMeanType.START_X: x_start, ### will be used in this case
                 ModelMeanType.EPSILON: noise,
-            }[self.model_mean_type]
-            assert model_output.shape == target.shape == x_start.shape
-            # mlp = MLP(**mlp_kwargs)
-            terms["mse"] = mean_flat((target - model_output) ** 2)
+            }[self.model_mean_type] 
 
+            ### Make sure all the shapes are the same.
+            assert model_output.shape == target.shape == x_start.shape
+
+            ### Don't know what this is for.
+            # mlp = MLP(**mlp_kwargs)
+
+            ### Calculate the mean squared error between the target and the model output.
+            terms["mse"] = mean_flat((target - model_output) ** 2)
+            print("terms['mse'].shape", terms["mse"].shape) ### shape batch size = [32]
+
+            ### If "vb" is in the terms dictionary, then add the mean squared error and the vb.
+            ### Only model_var_type is LEARNED or LEARNED_RANGE are in the terms dictionary.
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
+
+            ### model_var_type is FIXED_LARGE in train_plane configuration.
+            ### This branch will be executed.
             else:
                 terms["loss"] = terms["mse"]
+
         else:
             raise NotImplementedError(self.loss_type)
 
@@ -917,7 +967,22 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
                             dimension equal to the length of timesteps.
     :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
     """
+    ### In this case,
+    ### arr.shape = sqrt_alphas_cumprod.shape = [500] 
+    ### timesteps.shape = t.shape = [32]
+    ### broadcast_shape = x_start.shape = [32, 36737]
+    print("\nFrom _extract_into_tensor")
+    print("arr.shape", arr.shape)
+    print("timesteps.shape", timesteps.shape)
+    print("broadcast_shape", broadcast_shape)
+
+    ### Convert the numpy array to a tensor and read the values at the indices specified in timesteps.
+    ### res.shape = [32]
     res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+    print("res.shape", res.shape)
+
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
-    return res.expand(broadcast_shape)
+    print("Expanding res.shape to", res.shape) ### [32, 1]
+        
+    return res.expand(broadcast_shape) ### [32, 36737]

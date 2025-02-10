@@ -195,7 +195,7 @@ def main(cfg: DictConfig):
         train_dt = WeightDataset(
             mlps_folder_train,
             wandb_logger,
-            model.dims,
+            model.dims, ### 0, not used in this code
             mlp_kwargs,
             cfg,
             train_object_names,
@@ -210,7 +210,7 @@ def main(cfg: DictConfig):
         val_dt = WeightDataset(
             mlps_folder_train,
             wandb_logger,
-            model.dims,
+            model.dims, ### 0, not used in this code
             mlp_kwargs,
             cfg,
             val_object_names,
@@ -218,7 +218,7 @@ def main(cfg: DictConfig):
         test_dt = WeightDataset(
             mlps_folder_train,
             wandb_logger,
-            model.dims,
+            model.dims, ### 0, not used in this code
             mlp_kwargs,
             cfg,
             test_object_names,
@@ -255,7 +255,7 @@ def main(cfg: DictConfig):
     ### The real size of the input data is [batch_size, n_weight + timestep_embedding] = [batch_size, 36737 + 257] = [batch_size, 36994]
     print(
         "Input data shape, min, max:",
-        input_data.shape,   ### torch.Size([32, 36737])
+        input_data.shape,   ### torch.Size([32, 36737]) ### [B, n_weight]
         input_data.min(),   ### tensor(-21.4261)
         input_data.max(),   ### tensor(13.2952)
     )
@@ -271,6 +271,10 @@ def main(cfg: DictConfig):
     diffuser = HyperDiffusion(
         model, train_dt, val_dt, test_dt, mlp_kwargs, input_data.shape, method, cfg
     )
+
+    ### --------- Pytorch Lightning Checkpoint --------- ###
+    ### Define the callbacks
+    ### Probably not used in our code later
 
     # Specify where to save checkpoints
     checkpoint_path = join(
@@ -301,6 +305,9 @@ def main(cfg: DictConfig):
     )
 
     lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval="epoch")
+
+
+    ### --------- Pytorch Lightning Trainer --------- ###
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=torch.cuda.device_count(),
@@ -316,14 +323,19 @@ def main(cfg: DictConfig):
         ],
         check_val_every_n_epoch=Config.get("val_fid_calculation_period"),
         num_sanity_val_steps=0,
-        accumulate_grad_batches=cfg.accumulate_grad_batches,
+        accumulate_grad_batches=cfg.accumulate_grad_batches, ### 1, no accumulated grads ### https://lightning.ai/docs/pytorch/stable/common/optimization.html#id3
     )
 
+    ### --------- Train the model --------- ###
     if Config.get("mode") == "train":
         # If model_resume_path is provided (i.e., not None), the training will continue from that checkpoint
+        ### Check the training_step in HyperDiffusion
         trainer.fit(diffuser, train_dl, val_dl, ckpt_path=model_resume_path)
 
+    ### --------- Test the model --------- ###
     # best_model_save_path is the path to saved best model
+    ### Check the test_step in HyperDiffusion
+    ### Batch size = 100 in validation and test
     trainer.test(
         diffuser,
         test_dl,

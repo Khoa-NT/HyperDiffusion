@@ -149,6 +149,7 @@ class WeightDataset(Dataset):
         self, mlps_folder, wandb_logger, model_dims, mlp_kwargs, cfg, object_names=None
     ):
         ### Path to all the MLP's checkpoints
+        ### mlps_folder = ./mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
         self.mlps_folder = mlps_folder
 
         ### condition: 'no' in train_plane.yaml
@@ -164,11 +165,15 @@ class WeightDataset(Dataset):
             blacklist = set(np.genfromtxt(cfg.filter_bad_path, dtype=str))
 
         ### Check the name list
+        ### object_names = train_object_names
+        ### so will not go to this case
         if object_names is None:
             ### Get all the names from the name of checkpoints
             self.mlp_files = [file for file in list(os.listdir(mlps_folder))]
         
-        else: ### Will go to this case
+        ### Will go to this case
+        ### object_names = train_object_names
+        else: 
             self.mlp_files = []
             ### Get only the names from the input name list
             for file in list(os.listdir(mlps_folder)):
@@ -181,6 +186,9 @@ class WeightDataset(Dataset):
                     continue
 
                 ### Check if file name is correct with their format
+                ### For example, file = occ_1a04e3eab45ca15dd86060f189eb133_jitter_0_model_final.pth
+                ### and `1a04e3eab45ca15dd86060f189eb133.obj` in object_names
+                ### file.split("_")[1] = `1a04e3eab45ca15dd86060f189eb133` in object_names
                 # Check if file is in corresponding split (train, test, val)
                 # In fact, only train split is important here because we don't use test or val MLP weights
                 if ("_" in file and (file.split("_")[1] in object_names or (
@@ -189,15 +197,17 @@ class WeightDataset(Dataset):
 
         self.transform = None
         self.logger = wandb_logger
-        self.model_dims = model_dims
-        self.mlp_kwargs = mlp_kwargs
+        self.model_dims = model_dims ### Not used in this code
+        self.mlp_kwargs = mlp_kwargs ### Not used in this code
 
         ### augment: False in train_plane.yaml
+        ### so will not go to this case
         if cfg.augment in ["permute", "permute_same", "sort_permute"]: 
             self.example_mlp = get_mlp(mlp_kwargs)
 
         self.cfg = cfg
 
+        ### --------------- Not used in this code --------------- ###
         ### There is no first_weight_name in train_plane.yaml
         if "first_weight_name" in cfg and cfg.first_weight_name is not None:
             self.first_weights = self.get_weights(
@@ -205,18 +215,28 @@ class WeightDataset(Dataset):
             ).float()
 
         else: ### Will go to this case
-            ### It looks like first_weight_name is not used
+            ### It looks like first_weight_name is not used in this code.
+            ### Even it specified in overfit_plane.yaml but not used in this code.
             self.first_weights = torch.tensor([0])
 
     def get_weights(self, state_dict):
+        ### Read all the weights from the state_dict
         weights = []
-        shapes = []
+        shapes = [] ### Not used in this code
         for weight in state_dict:
             shapes.append(np.prod(state_dict[weight].shape))
+
+            ### Flatten the weight and convert to CPU
             weights.append(state_dict[weight].flatten().cpu())
+
+        ### Then concatenate all the weights into a single tensor
         weights = torch.hstack(weights)
+
+        ### Clone the weights for keeping the original weights
+        ### however, it is not used in this code because augment is False
         prev_weights = weights.clone()
 
+        ### --------------- Not used in this code --------------- ###
         # Some augmentation methods are available althougwe don't use them in the main paper
         if self.cfg.augment == "permute":
             weights = random_permute_flat(
@@ -247,18 +267,28 @@ class WeightDataset(Dataset):
         file = self.mlp_files[index]
 
         ### Get the path of the file
+        ### mlps_folder = ./mlp_weights/3d_128_plane_multires_4_manifoldplus_slower_no_clipgrad
+        ### file = occ_1a04e3eab45ca15dd86060f189eb133_jitter_0_model_final.pth
         dir = join(self.mlps_folder, file)
         
+
+        ### --------------- Check if the file is a directory --------------- ###
         ### Check if the file is a directory
         if os.path.isdir(dir):
             path1 = join(dir, "checkpoints", "model_final.pth")
             path2 = join(dir, "checkpoints", "model_current.pth")
             state_dict = torch.load(path1 if os.path.exists(path1) else path2)
+        
+        ### will go to this case because file is not a directory
         else:
             state_dict = torch.load(dir, map_location=torch.device("cpu"))
 
+        ### Get the weights from the state_dict
+        ### weights_prev is not used in this code because augment is False
+        ### weights.shape = (36737,)
         weights, weights_prev = self.get_weights(state_dict)
 
+        ### --------------- Not used in this code --------------- ###
         if self.cfg.augment == "inter":
             other_index = np.random.choice(len(self.mlp_files))
             other_dir = join(self.mlps_folder, self.mlp_files[other_index])
@@ -269,6 +299,8 @@ class WeightDataset(Dataset):
             )  # Prev: 0.3
             weights = torch.lerp(weights, other_weights, lerp_alpha)
 
+        ### Return the weights and the previous weights (not used in this code)
+        ### And why return 2 previous weights?
         return weights.float(), weights_prev.float(), weights_prev.float()
 
     def __len__(self):

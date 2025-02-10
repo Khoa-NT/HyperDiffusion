@@ -10,6 +10,8 @@ from Pointnet_Pointnet2_pytorch.log.classification.pointnet2_ssg_wo_normals impo
     pointnet2_cls_ssg
 from torchmetrics_fid import FrechetInceptionDistance
 
+### Create a FID class that can be used to calculate the FID of a 3D point cloud
+### This one is modified from the 2D-FID code of torch_metrics
 # Using edited 2D-FID code of torch_metrics
 fid = FrechetInceptionDistance(reset_real_features=True)
 

@@ -25,6 +25,8 @@ class HyperDiffusion(pl.LightningModule):
         self, model, train_dt, val_dt, test_dt, mlp_kwargs, image_shape, method, cfg
     ):
         super().__init__()
+        print(f"\nFrom {self.__class__.__name__}")
+
         self.model = model
         self.cfg = cfg
         self.method = method
@@ -33,28 +35,38 @@ class HyperDiffusion(pl.LightningModule):
         self.train_dt = train_dt
         self.test_dt = test_dt
         self.ae_model = None
-        self.sample_count = min(
-            8, Config.get("batch_size")
-        )  # it shouldn't be more than 36 limited by batch_size
+
+        ### It seems this is not used in the code
+        self.sample_count = min(8, Config.get("batch_size"))  # it shouldn't be more than 36 limited by batch_size
+
         ### image_shape = [B, n_weight]
-        fake_data = torch.randn(*image_shape) 
+        fake_data = torch.randn(*image_shape) ### [32, 36737]
 
         encoded_outs = fake_data
-        print("encoded_outs.shape", encoded_outs.shape)
-        timesteps = Config.config["timesteps"]
-        betas = torch.tensor(np.linspace(1e-4, 2e-2, timesteps))
-        self.image_size = encoded_outs[:1].shape ### [B, n_weight]
+        print("encoded_outs.shape", encoded_outs.shape) ### [32, 36737]
+
+        timesteps = Config.config["timesteps"] ### timesteps: 500 in train_plane.yaml
+        betas = torch.tensor(np.linspace(1e-4, 2e-2, timesteps)) ### betas.shape = [500]
+        
+        self.image_size = encoded_outs[:1].shape ### [1, n_weight] ### Read 1 batch size
+        print("self.image_size", self.image_size) ### [1, 36737]
 
         # Initialize diffusion utiities
+        ### model_mean_type: START_X
+        ### model_var_type: FIXED_LARGE
+        ### loss_type: MSE
         self.diff = GaussianDiffusion(
             betas=betas,
-            model_mean_type=ModelMeanType[cfg.diff_config.params.model_mean_type],
-            model_var_type=ModelVarType[cfg.diff_config.params.model_var_type],
-            loss_type=LossType[cfg.diff_config.params.loss_type],
-            diff_pl_module=self,
+            model_mean_type=ModelMeanType[cfg.diff_config.params.model_mean_type], ### START_X
+            model_var_type=ModelVarType[cfg.diff_config.params.model_var_type], ### FIXED_LARGE
+            loss_type=LossType[cfg.diff_config.params.loss_type], ### MSE
+            diff_pl_module=self, ### self: HyperDiffusion class. Will be used to register buffers.
         )
 
+    ### This forward function is not used in this code.
     def forward(self, images):
+        print(f"\nFrom {self.__class__.__name__} forward")
+
         t = (
             torch.randint(0, high=self.diff.num_timesteps, size=(images.shape[0],))
             .long()
@@ -92,27 +104,49 @@ class HyperDiffusion(pl.LightningModule):
 
     ### Training step from `trainer.fit` in main.py
     def training_step(self, train_batch, batch_idx):
+        ### train_batch
+        ### train_batch is the output of `WeightDataset.__getitem__`
+        ### train_batch = weights, weights_prev, weights_prev
+
+
+        print(f"\nFrom {self.__class__.__name__} training_step")
+
+        ### ------------------- Just for testing ------------------- ###
+        ### I think this code is for debuging their pipeline code.
+        ### We can skip this part.
+
+        ### Get the 1st item in the batch which is `weights` in `WeightDataset.__getitem__`
         # Extract input_data (either voxel or weight) which is the first element of the tuple
-        input_data = train_batch[0]
+        input_data = train_batch[0] ### A batch of weights.
+        print(f"input_data.shape: {input_data.shape}") ### [B, n_weight] = [32, 36737]
 
         # At the first step output first element in the dataset as a sanit check
         if "hyper" in self.method and self.trainer.global_step == 0:
-            print(f"\nFrom {self.__class__.__name__}")
-            
+
             ### curr_weights is not defined --> curr_weights=None
-            curr_weights = Config.get("curr_weights")
+            ### I think this one is to limit the number of weights to use.
+            curr_weights = Config.get("curr_weights") ### None
 
-            img = input_data[0].flatten()[:curr_weights] ### Get all weights
-            print(f"img.shape: {img.shape}")
+            ### Read the 1st item in the batch (which is the mlp weights), and flatten it.
+            ### If curr_weights is not defined (e.g., None), then use all weights.
+            img = input_data[0].flatten()[:curr_weights]
+            print(f"img.shape: {img.shape}") ### [36737]
 
+            ### Create the mlp model from the weights shape and the mlp_kwargs settings.
             mlp = generate_mlp_from_weights(img, self.mlp_kwargs)
+
+            ### Create the SDF decoder.
             sdf_decoder = SDFDecoder(
                 self.mlp_kwargs.model_type,
                 None,
                 "nerf" if self.mlp_kwargs.model_type == "nerf" else "mlp",
                 self.mlp_kwargs,
             )
+
+            ### And then assign the mlp model to the sdf_decoder. Why?
             sdf_decoder.model = mlp.cuda()
+
+            ### Create the mesh for the first mesh.
             if not self.mlp_kwargs.move:
                 sdf_meshing.create_mesh(
                     sdf_decoder,
@@ -121,7 +155,8 @@ class HyperDiffusion(pl.LightningModule):
                     level=0.5 if self.mlp_kwargs.output_type == "occ" else 0,
                 )
 
-            print("Input images shape:", input_data.shape)
+            print("Input images shape:", input_data.shape) ### [B, n_weight] = [32, 36737]
+
         elif self.method == "raw_3d" and self.trainer.global_step == 0:
             if self.cfg.mlp_config.params.move:
                 out_imgs = []
@@ -148,8 +183,10 @@ class HyperDiffusion(pl.LightningModule):
                 img, _ = render_mesh(vox_grid_mesh)
                 self.logger.log_image("first_voxel", [img])
 
+
+        ### ------------------- Logging ------------------- ###
         # Output statistics every 100 step
-        if self.trainer.global_step % 100 == 0:
+        if self.trainer.global_step % 100 == 0: ### Step in one epoch
             print(input_data.shape)
             print(
                 "Orig weights[0].stats",
@@ -159,28 +196,39 @@ class HyperDiffusion(pl.LightningModule):
                 input_data.std().item(),
             )
 
+
+        ### ------------------- Diffusion ------------------- ###
+        ### Get the random diffusion timestep based on the batch size.
+        ### input_data.shape = [B, n_weight] = [32, 36737]
         # Sample a diffusion timestep
         t = (
             torch.randint(0, high=self.diff.num_timesteps, size=(input_data.shape[0],))
             .long()
             .to(self.device)
-        )
+        ) ### t.shape = [32]
 
         # Execute a diffusion forward pass
+        ### Compute training losses for a single timestep.
+        ### loss_terms is a dictionary which contains the loss values in the key "loss".
         loss_terms = self.diff.training_losses(
-            self.model,
-            input_data * self.cfg.normalization_factor,
-            t,
+            self.model, ### self.model is the Transformer model.
+            input_data * self.cfg.normalization_factor, ### normalization_factor: 1 in train_plane.yaml
+            t, ### t.shape = [32]
             self.mlp_kwargs,
             self.logger,
             model_kwargs=None,
         )
+
+        ### Calculate the mean of the loss values.
         loss_mse = loss_terms["loss"].mean()
+
+        ### Log the loss value.
         self.log("train_loss", loss_mse)
 
         loss = loss_mse
         return loss
-
+    
+    
     def validation_step(self, val_batch, batch_idx):
         metric_fn = (
             self.calc_metrics_4d
